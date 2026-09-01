@@ -218,3 +218,15 @@ Hebrew in it is never touched by the reverse fix.
   replacement. If another app is holding the clipboard open the write can fail silently, and
   pasting then would have wiped the selected text; instead you get "clipboard is busy".
 - The file must keep its UTF-8 BOM, otherwise AutoHotkey may misread the Hebrew map.
+
+## License
+
+Free for any noncommercial purpose, under the [PolyForm Noncommercial License 1.0.0](LICENSE.md)
+(SPDX: `PolyForm-Noncommercial-1.0.0`) — personal use, study, hobby projects, and use by
+schools, charities, public research and government bodies. Commercial use is not covered by
+it; ask the author and it can be arranged separately.
+
+Deliberately not an OSI open-source licence: anyone should be able to use and adapt LangFix
+freely, while selling it or shipping it inside a paid product needs a word first. GitHub's
+licence detector does not recognise PolyForm, so the sidebar may show no licence badge —
+`LICENSE.md` is the authoritative text.
