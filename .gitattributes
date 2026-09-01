@@ -1,0 +1,5 @@
+# Windows-only tooling: keep CRLF in the working tree wherever it is cloned,
+# so .bat labels and AutoHotkey scripts behave the same everywhere.
+* text=auto eol=crlf
+*.zip binary
+*.b64 binary

@@ -1,0 +1,9 @@
+# LangFix writes every keystroke you type into this file when DEBUG := true
+# near the top of LangFix.ahk. It is a full keylog - it must never reach a
+# public repo. Matches at any depth, and any _dbg variant.
+_dbg*
+*.log
+
+# Build artefacts - regenerate from the dist/LangFix/ folder.
+dist/*.zip
+dist/*.b64
