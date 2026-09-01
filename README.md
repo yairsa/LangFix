@@ -221,12 +221,12 @@ Hebrew in it is never touched by the reverse fix.
 
 ## License
 
-Free for any noncommercial purpose, under the [PolyForm Noncommercial License 1.0.0](LICENSE.md)
-(SPDX: `PolyForm-Noncommercial-1.0.0`) — personal use, study, hobby projects, and use by
-schools, charities, public research and government bodies. Commercial use is not covered by
-it; ask the author and it can be arranged separately.
+MIT, plus the [Commons Clause](LICENSE.md). In plain terms: **use it however you like,
+including at work and inside a company** — install it, change it, share it, build on it.
+The single thing you may not do is sell it: charge for LangFix itself, or for a product or
+service whose value comes substantially from what it does.
 
-Deliberately not an OSI open-source licence: anyone should be able to use and adapt LangFix
-freely, while selling it or shipping it inside a paid product needs a word first. GitHub's
-licence detector does not recognise PolyForm, so the sidebar may show no licence badge —
-`LICENSE.md` is the authoritative text.
+Keep the copyright notice and the Commons Clause notice with any copy you pass on.
+
+(The Commons Clause makes this technically not OSI open source, and GitHub will not show a
+licence badge for it — `LICENSE.md` is the authoritative text.)
