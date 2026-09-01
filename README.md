@@ -228,5 +228,8 @@ service whose value comes substantially from what it does.
 
 Keep the copyright notice and the Commons Clause notice with any copy you pass on.
 
+**Want to sell it?** That is the one right the Commons Clause holds back, and it can be
+licensed separately — email Yair Sahar at <mail [at] yairsahar [dot] co [dot] il>.
+
 (The Commons Clause makes this technically not OSI open source, and GitHub will not show a
 licence badge for it — `LICENSE.md` is the authoritative text.)

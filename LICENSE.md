@@ -10,7 +10,7 @@ Software: LangFix
 
 License: MIT
 
-Licensor: Yair Sahar
+Licensor: Yair Sahar (mail [at] yairsahar [dot] co [dot] il)
 
 ---
 MIT License
@@ -35,3 +35,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+
+## Commercial licensing
+
+Not part of the licence texts above.
+
+The Commons Clause withholds only the right to Sell. If you want that right - to sell LangFix
+itself, or a product or service whose value derives substantially from it - email Yair Sahar at mail [at] yairsahar [dot] co [dot] il and separate terms can be arranged.
