@@ -14,7 +14,8 @@ Rec := ""
 Run "conhost.exe cmd.exe", , , &pid
 if (!WinWait("ahk_class ConsoleWindowClass", , 8)) {
     FileAppend "SKIPPED - no console window appeared`n", A_ScriptDir "\_consolecopy.txt", "UTF-8"
-    ExitApp
+    RestoreMouse()
+ExitApp
 }
 WinActivate "ahk_class ConsoleWindowClass"
 Sleep 1000
@@ -26,7 +27,8 @@ Rec .= "console  copy   : [" A_Clipboard "]   (want: שלום (עולם))`n"
 ; ---- 2. ordinary window focused ----
 g := Gui("+AlwaysOnTop", "not a terminal")
 g.Add("Edit", "w400 h50")
-g.Show()
+SaveMouse()
+Rec .= ScreenNote(ShowOffPrimary(g)) "`n"
 WinActivate "ahk_id " g.Hwnd
 Sleep 1000
 Rec .= "active class    : " WinGetClass("A") "`n"
@@ -45,3 +47,5 @@ try WinClose "ahk_class ConsoleWindowClass"
 try ProcessClose pid
 FileAppend Rec, A_ScriptDir "\_consolecopy.txt", "UTF-8"
 ExitApp
+
+#Include screen.ahk

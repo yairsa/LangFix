@@ -11,7 +11,8 @@ SendLevel 1
 Rec := ""
 g := Gui("+AlwaysOnTop", "LangFix language-switch test")
 ed := g.Add("Edit", "w520 h60")
-g.Show()
+SaveMouse()
+Rec .= ScreenNote(ShowOffPrimary(g)) "`n"
 Loop 5 {
     WinActivate "ahk_id " g.Hwnd
     if WinWaitActive("ahk_id " g.Hwnd, , 2)
@@ -48,9 +49,12 @@ Sleep 2500
 Rec .= "after ^!L #2 : [" ed.Value "]  layout=" Lay() "   (want English 0409)`n"
 
 FileAppend Rec, A_ScriptDir "\_langswitch.txt", "UTF-8"
+RestoreMouse()
 ExitApp
 
 Lay() {
     tid := DllCall("GetWindowThreadProcessId", "Ptr", WinExist("A"), "Ptr", 0, "UInt")
     return Format("{:08X}", DllCall("GetKeyboardLayout", "UInt", tid, "Ptr"))
 }
+
+#Include screen.ahk

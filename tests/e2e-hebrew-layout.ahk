@@ -11,7 +11,8 @@ SendLevel 1
 Rec := ""
 g := Gui("+AlwaysOnTop", "LangFix hebrew e2e")
 ed := g.Add("Edit", "w500 h60")
-g.Show()
+SaveMouse()
+Rec .= ScreenNote(ShowOffPrimary(g)) "`n"
 WinActivate "ahk_id " g.Hwnd
 Sleep 600
 
@@ -32,4 +33,7 @@ Sleep 1500
 Rec .= "after ^!L  : [" ed.Value "]`n"
 
 FileAppend Rec, A_ScriptDir "\_e2e_heb.txt", "UTF-8"
+RestoreMouse()
 ExitApp
+
+#Include screen.ahk

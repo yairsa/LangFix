@@ -7,3 +7,6 @@ _dbg*
 # Build artefacts - regenerate from the dist/LangFix/ folder.
 dist/*.zip
 dist/*.b64
+
+# Test output, regenerated on every run.
+tests/_*.txt

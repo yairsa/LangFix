@@ -17,6 +17,14 @@ SetKeyDelay 8, 8
 ;                    real text selection at all.
 ;                 2. otherwise, whatever is SELECTED - pasted back over
 ;                    the selection. For Word, ReadAll, browsers.
+;               The typed path only ever touches the CURRENT LINE, and
+;               inside that line only the trailing run in the wrong
+;               language - it stops at the last character that was
+;               already right:
+;                   in case גולן is at the correct פךשבק
+;                ->  in case גולן is at the correct place
+;               A SELECTION, by contrast, is converted whole - you chose
+;               where it starts and ends.
 ;               It then SWITCHES THE KEYBOARD to the language the text
 ;               ended up in - needing this hotkey means the keyboard was
 ;               wrong, and it still is, so the next keystroke would be
@@ -44,7 +52,8 @@ SetKeyDelay 8, 8
 ;  Ctrl+Alt+D   Show what is currently in the typing buffer.
 ;
 ;  The typed-characters buffer lives in memory only, never touches disk,
-;  holds at most 1000 characters and is cleared on Enter, Esc, Tab, any
+;  holds at most 1000 characters, NEVER holds a line break - a new line
+;  starts a new buffer - and is cleared on Enter, Esc, Tab, any
 ;  arrow/Home/End/Delete, any Ctrl or Alt combo except Ctrl+V, any mouse
 ;  click, and whenever the active window changes.
 ;
@@ -106,6 +115,12 @@ for k, v in E2H.Clone() {
 global Buf    := ""        ; characters typed since the last reset
 global BufWin := 0         ; window they were typed into
 global Busy   := false     ; true while WE are sending keys
+
+; What the last fix produced, so a second press flips back exactly the same
+; characters instead of asking again where the wrong-language run began.
+global LastFixLine  := ""
+global LastFixStart := 0
+global LastFixWin   := 0
 
 ; ===================== auto-fix console copies =======================
 ; Hebrew copied out of a console arrives visually ordered. We fix it at
@@ -269,6 +284,17 @@ BufChar(ih, char) {
     ; would wipe the buffer a moment before FixTyped() reads it.
     if (GetKeyState("Control", "P") || GetKeyState("Alt", "P"))
         return
+    ; Enter reaches us here as a CHARACTER too, a moment after BufKey has
+    ; already cleared the buffer for it - so appending it would leave a lone
+    ; `r in an otherwise empty buffer, and the next fix would backspace
+    ; straight through the line break and eat the end of the previous line.
+    ; The buffer holds ONE line: a line break starts a new one.
+    if (char = "`r" || char = "`n") {
+        Buf := ""
+        BufWin := WinExist("A")
+        Dbg("line break -> buffer cleared")
+        return
+    }
     hwnd := WinExist("A")
     if (hwnd != BufWin) {                 ; moved to another window
         Dbg("char '" char "' : window changed " BufWin " -> " hwnd " (buffer cleared)")
@@ -333,9 +359,8 @@ TrackPaste() {
 
 AppendPaste(txt) {
     global Buf, BufWin
-    ; Multi-line or very large pastes are not safely reversible by
-    ; backspacing, so drop the buffer rather than guess at it.
-    if (txt = "" || StrLen(txt) > 1000 || InStr(txt, "`n") || InStr(txt, "`r")) {
+    ; Very large pastes are not safely reversible by backspacing.
+    if (txt = "" || StrLen(txt) > 1000) {
         Buf := ""
         return
     }
@@ -343,6 +368,15 @@ AppendPaste(txt) {
     if (hwnd != BufWin) {
         Buf := ""
         BufWin := hwnd
+    }
+    ; A multi-line paste leaves the caret at the end of its LAST line, and
+    ; everything before the caret on that line came from the paste - so that
+    ; tail is exactly what a fix may safely backspace over. The lines above
+    ; it are previous text now, and are left alone.
+    if (InStr(txt, "`n") || InStr(txt, "`r")) {
+        Buf := LastLine(txt)
+        Dbg("multi-line paste -> Buf=[" Buf "]")
+        return
     }
     Buf .= txt
     Dbg("paste appended -> Buf=[" Buf "]")
@@ -375,18 +409,38 @@ FixTyped() {
 }
 
 ; Replace the tail of the input we have been watching.
+; Two things are deliberately left alone: anything above the current line,
+; and anything up to the last character that was already in the right
+; language. Only the trailing wrong-language run is backspaced over.
 ReplaceTyped() {
-    global Buf, Busy
-    src := Buf
-    out := SwapLayout(src)
+    global Buf, Busy, LastFixLine, LastFixStart, LastFixWin
+    src  := LastLine(Buf)                 ; a fix never crosses a line break
+    hwnd := WinExist("A")
+
+    ; A second press undoes the first: flip back exactly the run we changed.
+    ; Asking TailStart() again would give a different, longer answer - it
+    ; would be reading the FIXED text this time.
+    start := (src = LastFixLine && hwnd = LastFixWin && LastFixStart)
+                 ? LastFixStart
+                 : TailStart(src)
+    head := SubStr(src, 1, start - 1)
+    tail := SubStr(src, start)
+    if (tail = "") {
+        Toast("nothing to fix on this line", 1600)
+        return
+    }
+    out := SwapLayout(tail)
     ReleaseModifiers()
     Busy := true
-    TypeOut(StrLen(src), out)
+    TypeOut(StrLen(tail), out)
     Sleep 30
     Busy := false
-    Buf := out                            ; press again to flip back
-    SetClip(out)
-    AnnounceFixed(out)
+    Buf := head . out                     ; press again to flip back
+    LastFixLine  := Buf
+    LastFixStart := start
+    LastFixWin   := hwnd
+    SetClip(Buf)
+    AnnounceFixed(out)                    ; the language we ended up typing in
 }
 
 ; Backspace over n characters and type the replacement. Terminals need the
@@ -427,6 +481,14 @@ FixSelection(quiet := false) {
         return true
     }
     sel := A_Clipboard
+    ; Some editors (VS Code, Visual Studio) answer Ctrl+C with nothing
+    ; selected by copying the WHOLE LINE, trailing line break and all. That
+    ; is not a selection, and pasting it back would duplicate the line - so
+    ; when we arrived here on our own, read it as "nothing was selected".
+    if (quiet && (SubStr(sel, -1) = "`n" || SubStr(sel, -1) = "`r")) {
+        A_Clipboard := before
+        return false
+    }
     out := SwapLayout(sel)                        ; no trimming: the paste has
     if (out = "") {                               ; to match the selection
         A_Clipboard := before
@@ -545,6 +607,58 @@ HasHebrew(s) {
 IsHebrewChar(c) {
     o := Ord(c)
     return (o >= 0x05D0 && o <= 0x05EA)   ; alef..tav
+}
+
+; ===================== where a fix should START ======================
+; A wrong-language run sits at the END of what was typed - that is why the
+; hotkey is being pressed at all. Everything before it came out right and
+; has to survive, including a Hebrew name inside an English line:
+;
+;     in case גולן is at the correct פךשבק
+;                                     ^ the fix starts here  ->  place
+;
+; So: take the script of the LAST letter, walk back over that script and
+; over neutral characters (spaces, digits, punctuation - they belong to
+; neither), and stop dead at the first letter of the other script.
+
+; "H" Hebrew, "L" Latin, "" neither.
+ScriptOf(c) {
+    if (IsHebrewChar(c))
+        return "H"
+    o := Ord(c)
+    return ((o >= 0x41 && o <= 0x5A) || (o >= 0x61 && o <= 0x7A)) ? "L" : ""
+}
+
+; 1-based index of the first character a fix may change. 1 when the string
+; is all one script, or has no letters in it at all.
+TailStart(s) {
+    want := "", i := StrLen(s)
+    while (i >= 1) {                              ; the last letter's script
+        if ((t := ScriptOf(SubStr(s, i, 1))) != "") {
+            want := t
+            break
+        }
+        i--
+    }
+    if (want = "")
+        return 1
+    start := i, j := i - 1
+    while (j >= 1) {
+        t := ScriptOf(SubStr(s, j, 1))
+        if (t != "" && t != want)                 ; the other script - stop
+            break
+        if (t = want)
+            start := j                            ; still inside the run
+        j--                                       ; neutral - keep walking
+    }
+    return start
+}
+
+; The text after the last line break: the line the caret is sitting on.
+LastLine(s) {
+    if ((p := InStr(s, "`n", , -1)) || (p := InStr(s, "`r", , -1)))
+        return SubStr(s, p + 1)
+    return s
 }
 
 ; ========================= reversed-Hebrew fix =======================

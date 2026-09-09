@@ -10,7 +10,8 @@ SendLevel 1
 Rec := ""
 g := Gui("+AlwaysOnTop", "LangFix paste/select test")
 ed := g.Add("Edit", "w520 h80")
-g.Show()
+SaveMouse()
+Rec .= ScreenNote(ShowOffPrimary(g)) "`n"
 Loop 5 {
     WinActivate "ahk_id " g.Hwnd
     if WinWaitActive("ahk_id " g.Hwnd, , 2)
@@ -62,4 +63,7 @@ Sleep 2500
 Rec .= "  after ^!L    : [" ed.Value "]   (want: לומר)`n"
 
 FileAppend Rec, A_ScriptDir "\_pastesel.txt", "UTF-8"
+RestoreMouse()
 ExitApp
+
+#Include screen.ahk

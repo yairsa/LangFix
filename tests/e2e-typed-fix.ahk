@@ -10,7 +10,8 @@ SendLevel 1        ; level 0 input never triggers another script's hotkeys
 Rec := ""
 g := Gui("+AlwaysOnTop", "LangFix e2e test")
 ed := g.Add("Edit", "w500 h60")
-g.Show()
+SaveMouse()
+Rec .= ScreenNote(ShowOffPrimary(g)) "`n"
 WinActivate "ahk_id " g.Hwnd
 Sleep 800
 ControlFocus ed
@@ -28,4 +29,7 @@ Sleep 1500
 Rec .= "after ^!L#2: [" ed.Value "]`n"
 
 FileAppend Rec, A_ScriptDir "\_e2e.txt", "UTF-8"
+RestoreMouse()
 ExitApp
+
+#Include screen.ahk

@@ -5,7 +5,7 @@ starts with Windows.
 
 | Shortcut | What it does |
 |---|---|
-| **Ctrl + Alt + L** | **Fix text written in the wrong language** — covers what you just **typed**, what you just **pasted**, and any **selection**, in that order. Backspaces over it, retypes it in the other layout, **and switches the keyboard to that language**. Direction auto-detected. Press again to flip both back. |
+| **Ctrl + Alt + L** | **Fix text written in the wrong language** — covers what you just **typed**, what you just **pasted**, and any **selection**, in that order. Backspaces over it, retypes it in the other layout, **and switches the keyboard to that language**. Direction auto-detected. Only the **current line** and only its **trailing wrong-language run** are touched. Press again to flip both back. |
 | *(nothing to press)* | **Hebrew copied from a console is un-reversed automatically**, at the moment you copy it. Plain `Ctrl+V` then pastes it correctly into anything. Copies from Word / Chrome / ReadAll are never touched. |
 | **Ctrl + Alt + R** | Manual version of the above — un-reverse whatever is on the clipboard and paste it at the cursor, for copies the automatic rule missed. |
 | **Ctrl + Alt + Shift + L** | Force the **selection** path, skipping the typed buffer. Falls back to the clipboard when nothing is selected. *(ReadAll uses this combination for its own inbox — see Notes.)* |
@@ -14,6 +14,36 @@ starts with Windows.
 | **Win + Shift + L / R** | Alt-free twins of the two main fixes. Same behaviour, no Alt involved. |
 
 A small tooltip confirms each action.
+
+## What a fix is allowed to touch
+
+Two hard limits, both there so a press can never damage text that was already right.
+
+**The current line only.** The buffer holds one line: a line break starts a new one, and a
+fix never backspaces past it. Anything above the caret is previous text and is out of
+reach — including after a multi-line paste, where only the part after the last line break
+counts as fixable. *(This is the bug fixed on 09/09/2026: Enter arrives at the hook twice,
+once as a key and once as the character `` `r ``. The key cleared the buffer, the character
+then put a lone `` `r `` back into it — so the next fix backspaced through the line break
+and ate the end of the line above.)*
+
+**It stops at the last character that was already right.** A wrong-language run sits at the
+*end* of what you typed — that is why you are pressing the key at all. So the fix takes the
+script of the last letter, walks back over that script and over neutral characters (spaces,
+digits, punctuation), and stops dead at the first letter of the other script:
+
+```
+in case גולן is at the correct פךשבק   -> Ctrl+Alt+L ->
+in case גולן is at the correct place
+        ^^^^ a real Hebrew word, before the last English letter — untouched
+```
+
+A second press flips back **exactly the same run**, not whatever the rule would pick out of
+the now-corrected text.
+
+**A selection is the exception: it is converted whole.** You chose where it starts and ends,
+so `Ctrl+Alt+Shift+L` over a mixed line converts all of it. That is the escape hatch when
+the run you want fixed is not at the end of the line.
 
 ## One key, three sources
 
@@ -32,8 +62,16 @@ preferring the buffer means we never ask them to.
 
 **Pasted text counts as typed.** `Ctrl+V` used to invalidate the buffer; now the pasted
 string is appended to it, so `Ctrl+Alt+L` fixes typed and pasted text together in one go.
-Pastes over 1000 characters, or containing line breaks, still drop the buffer — those
-can't be safely undone by backspacing.
+A **multi-line** paste leaves only its last line in the buffer — the caret sits at the end
+of that line, and everything before the caret on it came from the paste, so that much is
+safely reversible while the lines above are not. Pastes over 1000 characters still drop the
+buffer entirely.
+
+**A whole-line copy is not a selection.** Some editors (VS Code, Visual Studio) answer
+`Ctrl+C` with nothing selected by copying the entire line, trailing line break and all.
+When `Ctrl+Alt+L` reaches the selection path on its own and gets back something ending in a
+line break, it treats that as "nothing was selected" and stops, rather than pasting a
+duplicate line.
 
 ## Why an Alt hotkey nudged ReadAll's menu bar
 
@@ -135,9 +173,9 @@ route: fix it before you press Enter.
 
 ### The buffer
 
-In memory only, never written to disk, capped at 1000 characters. Cleared on Enter, Esc,
-Tab, any arrow/Home/End/Delete, any Ctrl or Alt combination **except Ctrl+V**, any mouse
-click, and whenever the active window changes. The keyboard hook's own transcript is wiped
+In memory only, never written to disk, capped at 1000 characters, and **never holding a
+line break**. Cleared on Enter, Esc, Tab, any arrow/Home/End/Delete, any Ctrl or Alt
+combination **except Ctrl+V**, any mouse click, and whenever the active window changes. The keyboard hook's own transcript is wiped
 every 20 seconds.
 
 ## Examples
@@ -146,6 +184,9 @@ every 20 seconds.
 nv to tbh rumv kf,uc  -> Ctrl+Alt+L ->  מה אם אני רוצה לכתוב
 ן מקקג ש /וןבל כןס    -> Ctrl+Alt+L ->  i need a quick fix
 !(םלוע) םולש          -> Ctrl+Alt+R ->  שלום (עולם)!
+
+in case גולן is at the correct פךשבק
+                      -> Ctrl+Alt+L ->  in case גולן is at the correct place
 ```
 
 Brackets and parentheses are mirrored when reversing. Latin words and numbers inside a
@@ -167,15 +208,29 @@ Hebrew in it is never touched by the reverse fix.
   both the text and the active keyboard layout, in both directions.
 - `tests\e2e-paste-and-select.ahk` — typed-plus-pasted text fixed in one press, and the
   fall-through to the selection path after a click.
+- `tests\e2e-partial-and-lines.ahk` — the two limits above: a mixed English/Hebrew line
+  where only the trailing run may change (and a second press flips back only that run),
+  and a fix on a second line that must leave the first alone.
 - `tests\unit-swaplayout.ahk` — pure conversion checks, including the capitals and curly
-  quotes from a real Word paragraph. No focus needed.
+  quotes from a real Word paragraph, plus `TailStart` (where a fix may begin) and
+  `LastLine`. No focus needed.
 - `tests\e2e-alt-menu.ahk` — presses the hotkey over a window with a menu bar and asks
   Windows (`GetGUIThreadInfo`) whether a menu became active.
-- `tests\run-all.ps1` — restarts LangFix from disk and runs the whole suite:
-  `pwsh -File tests\run-all.ps1`. The e2e tests drive the real hotkeys, so they take over
-  the keyboard and mouse for about a minute — don't type while they run.
-  They all need LangFix running, and they send at `SendLevel 1` — level-0 synthetic input
-  never triggers another script's hotkeys, which is why a naive test appears to do nothing.
+- `tests\screen.ahk` — shared by every e2e test: puts the test window on the **secondary**
+  monitor, and saves and restores the mouse pointer.
+- `tests\run-all.ps1` — restarts LangFix from disk (which is also the syntax check) and runs
+  the tests:
+  - `pwsh -File tests\run-all.ps1` — **unit tests only.** Silent, takes nothing, safe to run
+    at any moment. This is the default deliberately.
+  - `pwsh -File tests\run-all.ps1 -E2E` — **also the end-to-end tests, which take over the
+    keyboard and mouse for about a minute.** Start them only when you are away from the
+    machine; anything you type meanwhile lands in the wrong window. They open on the
+    secondary monitor and put the pointer back, but focus is theirs while they run — the fix
+    under test reads a low-level keyboard hook, and a hook only ever sees real input.
+
+  All the e2e tests need LangFix running, and they send at `SendLevel 1` — level-0 synthetic
+  input never triggers another script's hotkeys, which is why a naive test appears to do
+  nothing.
 - Startup shortcut: `%AppData%\Microsoft\Windows\Start Menu\Programs\Startup\LangFix.lnk`
 - `LangFix-Control.ps1` — health check and on/off switch; see **Control** below.
 - `LangFix.bat` — double-clickable wrapper around it. Desktop copy: **LangFix Control**.

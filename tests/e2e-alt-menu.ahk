@@ -22,7 +22,8 @@ bar.Add("&Edit", fileMenu)
 g := Gui("+AlwaysOnTop", "LangFix alt-menu test")
 g.MenuBar := bar
 ed := g.Add("Edit", "w480 h60")
-g.Show()
+SaveMouse()
+Rec .= ScreenNote(ShowOffPrimary(g)) "`n"
 Loop 5 {
     WinActivate "ahk_id " g.Hwnd
     if WinWaitActive("ahk_id " g.Hwnd, , 2)
@@ -47,6 +48,7 @@ Rec .= "text after ^!L       : [" ed.Value "]`n"
 Rec .= "menu active after    : " MenuState() "   (want: no)`n"
 
 FileAppend Rec, A_ScriptDir "\_altmenu.txt", "UTF-8"
+RestoreMouse()
 ExitApp
 
 ; GetGUIThreadInfo: hwndMenuOwner is non-zero, and GUI_INMENUMODE (0x4) is
@@ -64,3 +66,5 @@ MenuState() {
     return (inMenu ? "YES" : "no") . "  (flags=" Format("{:X}", flags)
          . " menuOwner=" menuOwner ")"
 }
+
+#Include screen.ahk
