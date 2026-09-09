@@ -155,6 +155,12 @@ global LastFixStart := 0       ; where in that line the fix began
 global LastFixWin   := 0       ; the window it happened in
 global LastFixTail  := ""      ; what was there before  <- undo types this
 global LastFixOut   := ""      ; what the fix put there <- undo deletes this
+; A fix through the SELECTION path is a single paste, and an application's
+; own Ctrl+Z undoes a paste in one press - better than we could, since it
+; restores the selection too. So we deliberately do NOT claim Ctrl+Z after
+; one. This only records that it happened, so Ctrl+Alt+Z can say so instead
+; of claiming there is nothing to undo.
+global LastFixWasPaste := false
 
 ; ===================== auto-fix console copies =======================
 ; Hebrew copied out of a console arrives visually ordered. We fix it at
@@ -461,7 +467,7 @@ FixTyped() {
 ; and anything up to the last character that was already in the right
 ; language. Only the trailing wrong-language run is backspaced over.
 ReplaceTyped() {
-    global Buf, Busy, LastFixLine, LastFixStart, LastFixWin
+    global Buf, Busy, LastFixLine, LastFixStart, LastFixWin, LastFixWasPaste
     src  := LastLine(Buf)                 ; a fix never crosses a line break
     hwnd := WinExist("A")
 
@@ -489,6 +495,7 @@ ReplaceTyped() {
     LastFixWin   := hwnd
     LastFixTail  := tail                  ; everything Ctrl+Alt+Z needs
     LastFixOut   := out
+    LastFixWasPaste := false
     SetClip(Buf)
     AnnounceFixed(out)                    ; the language we ended up typing in
 }
@@ -533,10 +540,12 @@ CanUndoFix() {
 ; prevent, so refusing loudly is the correct answer, not a fallback.
 UndoFix() {
     global Buf, Busy, LastFixLine, LastFixStart, LastFixWin
-    global LastFixTail, LastFixOut
+    global LastFixTail, LastFixOut, LastFixWasPaste
     SwallowAlt()
     if (LastFixOut = "") {
-        Toast("nothing to undo - no fix has been made yet", 2000)
+        Toast(LastFixWasPaste
+            ? "that fix was a paste - plain Ctrl+Z undoes it in one press"
+            : "nothing to undo - no fix has been made yet", 2800)
         return
     }
     if (WinExist("A") != LastFixWin) {
@@ -563,6 +572,7 @@ UndoFix() {
     ; application's own undo, the way it would be anywhere else - not a redo,
     ; which is not what that key means. To redo, fix it again: Ctrl+Alt+L.
     LastFixLine := "", LastFixOut := "", LastFixTail := "", LastFixStart := 0
+    LastFixWasPaste := false
     SetClip(Buf)
     ; The keyboard follows the text here too - the same rule as the fix. The
     ; text is back in the language it was in, so the keyboard should be.
@@ -573,7 +583,7 @@ UndoFix() {
 ; Fix a real selection - browsers, Word, ReadAll, chat boxes.
 ; Returns true if it found a selection and acted on it.
 FixSelection(quiet := false) {
-    global Busy
+    global Busy, LastFixOut, LastFixWin, LastFixWasPaste
     ; FIRST - the hotkey's own Ctrl+Alt are still physically down, and a
     ; copy sent while Alt is held is Ctrl+Alt+C, which copies nothing.
     ReleaseModifiers()
@@ -621,6 +631,8 @@ FixSelection(quiet := false) {
     Send "^v"
     Sleep 150
     Busy := false
+    ; This one is the application's to undo - see LastFixWasPaste above.
+    LastFixOut := "", LastFixWasPaste := true, LastFixWin := WinExist("A")
     AnnounceFixed(out)
     return true
 }

@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #SingleInstance Force
 SendMode "Input"
 SetKeyDelay 15, 15
@@ -56,6 +56,29 @@ SendEvent "^{sc02C}"           ; Ctrl+Z
 Sleep 1200
 Rec .= "after ^Z     : [" ed.Value "]   (want: the EDIT's own undo ran,"
      . " i.e. the text is gone or changed - not still 'plain typing')`n"
+
+; --- 4. the SELECTION path: Ctrl+Z must undo that fix too ------------
+; We deliberately do not claim Ctrl+Z here - a fix through the selection
+; path is a single paste, and the application's own undo restores it (and
+; the selection) better than we could. This checks that the result Yair
+; sees is the same either way: Ctrl+Z puts his text back.
+ed.Value := ""
+Sleep 300
+ControlFocus ed
+SendEvent "{Text}kunr"
+Sleep 500
+ed.GetPos(&cx, &cy, &cw, &ch)
+Click cx + 40, cy + 12          ; a click clears the typed buffer, so the
+Sleep 500                       ; next fix has to go the selection route
+SendEvent "^{sc01E}"            ; Ctrl+A - select all
+Sleep 600
+Rec .= "`nselected     : [" ed.Value "]  (clicked, so the buffer is empty)`n"
+SendEvent "^!{sc026}"           ; Ctrl+Alt+L
+Sleep 2000
+Rec .= "after ^!L    : [" ed.Value "]   (want: לומר)`n"
+SendEvent "^{sc02C}"            ; Ctrl+Z
+Sleep 1200
+Rec .= "after ^Z     : [" ed.Value "]   (want: kunr - the paste undone)`n"
 
 FileAppend Rec, A_ScriptDir "\_undo.txt", "UTF-8"
 RestoreMouse()

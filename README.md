@@ -10,7 +10,9 @@ starts with Windows.
 | **Ctrl + Alt + R** | Manual version of the above — un-reverse whatever is on the clipboard and paste it at the cursor, for copies the automatic rule missed. |
 | **Ctrl + Alt + Shift + L** | Force the **selection** path, skipping the typed buffer. Falls back to the clipboard when nothing is selected. *(ReadAll uses this combination for its own inbox — see Notes.)* |
 | **Ctrl + Alt + Shift + R** | Reverse fix on the **clipboard only**, no paste. |
-| **Ctrl + Alt + D** | Show what is currently in the typing buffer (debug). |
+| **Ctrl + Z** | **Undo the last fix** — the normal undo key. Puts back exactly what `Ctrl+Alt+L` changed. It is only LangFix's key in the moment it can be; the rest of the time it is your application's own undo, untouched. |
+| **Ctrl + Alt + Z** | The same undo, always listening — so when nothing appears to happen, it says *why*. |
+| **Ctrl + Alt + D** | Show the typing buffer, and what `Ctrl+Z` would put back (debug). |
 | **Win + Shift + L / R** | Alt-free twins of the two main fixes. Same behaviour, no Alt involved. |
 
 A small tooltip confirms each action.
@@ -72,6 +74,48 @@ buffer entirely.
 When `Ctrl+Alt+L` reaches the selection path on its own and gets back something ending in a
 line break, it treats that as "nothing was selected" and stops, rather than pasting a
 duplicate line.
+
+## Undo is Ctrl+Z, and the rest of the time Ctrl+Z is not ours
+
+A fix is many backspaces followed by a retype, so an application's own undo unpicks it in
+pieces, if at all. So LangFix handles that one case itself: **`Ctrl+Z` puts back exactly the
+characters the fix replaced**, and the keyboard language with them.
+
+The delicate part is not undoing — it is **not owning `Ctrl+Z`**. The hotkey sits behind
+`#HotIf CanUndoFix()`, so it *exists only* in the moment it can be right: straight after a
+fix, in the same window, with the caret still where the fix left it. At every other moment
+the hotkey is not there at all and `Ctrl+Z` reaches the application exactly as it always did.
+Nothing to learn, nothing taken away.
+
+- **After undoing once it hands the key straight back**, so a second `Ctrl+Z` is your
+  application's own undo again. It is deliberately *not* a redo — that is not what that key
+  means. To redo, fix it again with `Ctrl+Alt+L`.
+- **A fix through the selection path is a single paste**, and your application's own `Ctrl+Z`
+  undoes a paste in one press — restoring the selection too, which we could not. So LangFix
+  does not claim the key after one. The result you see is the same either way: `Ctrl+Z` puts
+  your text back.
+- **In a console there is no application undo at all**, which is exactly where LangFix's own
+  matters most.
+- **`Ctrl+Alt+Z` is the same undo, always listening.** When `Ctrl+Z` does nothing because the
+  key was not ours, `Ctrl+Alt+Z` says which reason it was: wrong window, caret moved, nothing
+  fixed yet, or *that one was a paste — plain `Ctrl+Z` undoes it*.
+
+One trap this had to close on the way in: the buffer must **not** treat `Ctrl+Z` as one of
+ours when we are not holding the key. Otherwise an application-level undo would change the
+text while our buffer survived unchanged — and a later fix would backspace over characters
+that had already gone.
+
+### Why not snapshot the whole field first
+
+The obvious design is `Ctrl+A` + copy before every fix, and restore that on undo. It was
+rejected: **`Ctrl+A` moves the caret**, and the fix's backspaces would then land wherever it
+ended up. In a one-line field that is recoverable; in a multi-line field or a Word document
+there is no way to put the caret back where you were, so the snapshot meant to protect the
+text would be the thing that damaged it. It also has to borrow the clipboard, and restoring
+in Word would paste plain text over the document and strip its formatting.
+
+The undo above takes its snapshot **in memory** instead — it already knows the exact
+characters it replaced — which costs no keystrokes, no clipboard and no caret movement.
 
 ## Why an Alt hotkey nudged ReadAll's menu bar
 
@@ -208,6 +252,9 @@ Hebrew in it is never touched by the reverse fix.
   both the text and the active keyboard layout, in both directions.
 - `tests\e2e-paste-and-select.ahk` — typed-plus-pasted text fixed in one press, and the
   fall-through to the selection path after a click.
+- `tests\e2e-undo.ahk` — `Ctrl+Z` after a fix, and the two things that matter more: that a
+  second `Ctrl+Z` is the application's own undo rather than a redo, and that with no fix
+  pending the key was never ours at all. Plus the same through the selection path.
 - `tests\e2e-partial-and-lines.ahk` — the two limits above: a mixed English/Hebrew line
   where only the trailing run may change (and a second press flips back only that run),
   and a fix on a second line that must leave the first alone.
