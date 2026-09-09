@@ -44,6 +44,11 @@ if (-not (Get-Process AutoHotkey64 -ErrorAction SilentlyContinue)) {
 }
 Write-Host "LangFix running." -ForegroundColor Green
 
+# --- static check: assignments to globals that were never declared -------
+# Cheap, silent, and it catches the one class of bug AutoHotkey will not.
+& "$PSScriptRoot\check-globals.ps1"
+$globalsBad = ($LASTEXITCODE -ne 0) ? 1 : 0
+
 # --- unit tests: pure logic, no window, no input -------------------------
 # The logic block is lifted straight out of LangFix.ahk, so the tests always
 # run against the shipping code rather than a copy of it.
@@ -63,7 +68,7 @@ $unit
 Clear-File "$root\_unitrun.ahk"
 Clear-File "$root\_unit.txt"
 
-$failed = ([regex]::Matches($unit, '(?m)^FAIL')).Count
+$failed = ([regex]::Matches($unit, '(?m)^FAIL')).Count + $globalsBad
 if ($failed) { Write-Host "$failed unit test(s) FAILED" -ForegroundColor Red }
 else         { Write-Host "unit tests all passed"       -ForegroundColor Green }
 
@@ -82,6 +87,7 @@ $e2eTests = @(
     @{ name = 'console copy';     script = 'e2e-console-copy.ahk';     out = '_consolecopy.txt' }
     @{ name = 'partial + lines';  script = 'e2e-partial-and-lines.ahk'; out = '_partial.txt' }
     @{ name = 'undo on Ctrl+Z';   script = 'e2e-undo.ahk';             out = '_undo.txt' }
+    @{ name = 'redo + safety';    script = 'e2e-redo-and-safety.ahk';  out = '_redo.txt' }
 )
 Write-Host "`nStarting the end-to-end tests - the keyboard and mouse are theirs" -ForegroundColor Yellow
 Write-Host "for about a minute. Windows open on the secondary monitor." -ForegroundColor Yellow

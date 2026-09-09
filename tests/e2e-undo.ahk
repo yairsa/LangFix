@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #SingleInstance Force
 SendMode "Input"
 SetKeyDelay 15, 15
@@ -39,8 +39,7 @@ Loop 5 {
         break
     Sleep 400
 }
-Sleep 700
-ControlFocus ed
+Refocus(g, ed)
 
 ; --- 1. fix, then undo -----------------------------------------------
 SendEvent "{Text}nv to tbh"
@@ -67,8 +66,7 @@ Rec .= "after ^Z #2  : [" ed.Value "]  LangFix acted: " Acted()
 
 ; --- 3. no fix pending: Ctrl+Z was never ours ------------------------
 ed.Value := ""
-Sleep 300
-ControlFocus ed
+Refocus(g, ed)
 SendEvent "{Text}plain typing"
 Sleep 700
 Rec .= "`ntyped        : [" ed.Value "]  (no fix made - Ctrl+Z is the app's)`n"
@@ -84,8 +82,7 @@ Rec .= "after ^Z     : [" ed.Value "]  LangFix acted: " Acted()
 ; paste, and the application's own undo restores it, and the selection with
 ; it, better than we could. What Yair sees must be the same either way.
 ed.Value := ""
-Sleep 300
-ControlFocus ed
+Refocus(g, ed)
 SendEvent "{Text}kunr"
 Sleep 500
 ed.GetPos(&cx, &cy, &cw, &ch)

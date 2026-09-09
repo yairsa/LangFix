@@ -51,3 +51,23 @@ RestoreMouse() {
     DllCall("SetCursorPos", "Int", _mx, "Int", _my)
     CoordMode "Mouse", "Client"
 }
+
+; ---------------------------------------------------------------------
+; Between phases a test must return to a KNOWN state, or the next phase
+; measures the last one's wreckage. Two things drift: the keyboard layout,
+; which LangFix deliberately switches, and the real keyboard focus, which
+; a layout-switch flyout can take. ControlFocus alone does not get it back
+; if the window itself is no longer active.
+Refocus(g, ed) {
+    Loop 5 {
+        WinActivate "ahk_id " g.Hwnd
+        if WinWaitActive("ahk_id " g.Hwnd, , 2)
+            break
+        Sleep 400
+    }
+    en := DllCall("LoadKeyboardLayout", "Str", "00000409", "UInt", 1, "Ptr")
+    DllCall("ActivateKeyboardLayout", "Ptr", en, "UInt", 0, "Ptr")
+    Sleep 300
+    ControlFocus ed
+    Sleep 200
+}
