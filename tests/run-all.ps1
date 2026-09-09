@@ -1,4 +1,4 @@
-# Runs the LangFix test suite.
+﻿# Runs the LangFix test suite.
 #
 #   pwsh -File tests\run-all.ps1          unit tests only - silent, safe to
 #                                         run at any time, takes nothing
@@ -74,7 +74,7 @@ if (-not $E2E) {
 }
 
 # --- end-to-end tests: THESE TAKE THE KEYBOARD ---------------------------
-$e2e = @(
+$e2eTests = @(
     @{ name = 'typed fix';        script = 'e2e-typed-fix.ahk';        out = '_e2e.txt' }
     @{ name = 'hebrew layout';    script = 'e2e-hebrew-layout.ahk';    out = '_e2e_heb.txt' }
     @{ name = 'language switch';  script = 'e2e-lang-switch.ahk';      out = '_langswitch.txt' }
@@ -84,7 +84,7 @@ $e2e = @(
 )
 Write-Host "`nStarting the end-to-end tests - the keyboard and mouse are theirs" -ForegroundColor Yellow
 Write-Host "for about a minute. Windows open on the secondary monitor." -ForegroundColor Yellow
-foreach ($t in $e2e) {
+foreach ($t in $e2eTests) {
     Clear-File "$root\tests\$($t.out)"
     $ok = Invoke-Ahk "$root\tests\$($t.script)" 60000
     Write-Host "`n=== e2e: $($t.name) ===" -ForegroundColor Cyan
