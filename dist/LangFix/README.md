@@ -41,14 +41,40 @@ Language & region). You almost certainly do already.
 
 | Shortcut | What it does |
 |---|---|
-| **Ctrl+Alt+L** | Fix text written in the wrong language, and switch the keyboard to match. Press again to flip back. |
-| **Win+Shift+L** | Exactly the same, without Alt — use it if any app reacts badly to Alt. |
+| **Ctrl+Alt+L** | Fix text written in the wrong language, and switch the keyboard to match. |
+| **Ctrl+Z** | **Undo that fix** — the normal undo key. *(New)* |
+| **Ctrl+Y** | **Redo it.** *(New)* |
+| **Win+Shift+L** | Exactly the same as Ctrl+Alt+L, without Alt — use it if any app reacts badly to Alt. |
 | *(nothing to press)* | Hebrew copied from a terminal is un-reversed automatically. |
 | **Ctrl+Alt+R** | Manual version of that: un-reverse the clipboard and paste it here. |
 | **Ctrl+Alt+Shift+L** | Fix a selection, ignoring what you typed. |
 | **Ctrl+Alt+Shift+R** | Un-reverse the clipboard without pasting. |
+| **Ctrl+Alt+Z / Y** | The same undo and redo, but they always answer — so when nothing seems to happen, they say why. |
 
 A small tooltip confirms each action.
+
+### New in this version
+
+**Ctrl+Z undoes a fix.** The normal undo key — it puts back exactly the characters the fix
+replaced, and the keyboard language with them. **Ctrl+Y** redoes it, and the two cycle.
+
+The care went into *not* stealing Ctrl+Z: it is only LangFix's key in the one moment it can
+be — straight after a fix, same window, cursor unmoved. Every other Ctrl+Z in your life
+reaches your application untouched, because at that moment the shortcut does not exist.
+After undoing once it hands the key straight back.
+
+**It only fixes the current line.** A fix can no longer reach past a line break into text
+above it. (It could before, and occasionally did.)
+
+**It stops at the last character that was already right.** A wrong-language run sits at the
+*end* of what you typed — that is why you are pressing the key. So a Hebrew word inside an
+English line now survives:
+
+```
+in case גולן is at the correct פךשבק   →   in case גולן is at the correct place
+```
+
+A *selection*, by contrast, is still converted whole — you chose where it starts and ends.
 
 ### The one thing worth knowing
 
@@ -61,8 +87,9 @@ so it can never delete characters it didn't watch you type. After any of those, 
 back to **whatever you have selected**, so you can still select the text and press the same
 key. Both work.
 
-The one place selections don't exist is inside a terminal, so there: fix it before you
-press Enter.
+Inside a **terminal** there are no selections, so there the typed memory is the only route:
+fix it before you press Enter. If that memory is empty in a terminal, Ctrl+Alt+L now does
+nothing at all and says so, rather than reaching for a selection that cannot exist.
 
 ### Right-to-left details it gets right
 

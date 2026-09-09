@@ -1,5 +1,10 @@
 ﻿#Requires AutoHotkey v2.0
 #SingleInstance Force
+; Catches the bug that cost an afternoon on 09/09/2026: assigning to a name
+; that is also a global, without declaring it, silently creates a local and
+; leaves the global untouched. OutputDebug, not MsgBox - this script runs all
+; day and must never pop a dialog at Yair.
+#Warn LocalSameAsGlobal, OutputDebug
 SendMode "Input"
 #UseHook true
 SetKeyDelay 8, 8
@@ -17,6 +22,14 @@ SetKeyDelay 8, 8
 ;                    real text selection at all.
 ;                 2. otherwise, whatever is SELECTED - pasted back over
 ;                    the selection. For Word, ReadAll, browsers.
+;               The typed path only ever touches the CURRENT LINE, and
+;               inside that line only the trailing run in the wrong
+;               language - it stops at the last character that was
+;               already right:
+;                   in case גולן is at the correct פךשבק
+;                ->  in case גולן is at the correct place
+;               A SELECTION, by contrast, is converted whole - you chose
+;               where it starts and ends.
 ;               It then SWITCHES THE KEYBOARD to the language the text
 ;               ended up in - needing this hotkey means the keyboard was
 ;               wrong, and it still is, so the next keystroke would be
@@ -41,10 +54,39 @@ SetKeyDelay 8, 8
 ;                     Ctrl+Alt+L there.
 ;  Ctrl+Alt+Shift+R   Reverse fix on the clipboard only, no paste.
 ;
-;  Ctrl+Alt+D   Show what is currently in the typing buffer.
+;  Ctrl+Z       UNDO the last fix - the normal undo key. Puts back
+;               exactly the characters the fix replaced, and the
+;               keyboard language with them.
+;               It is only LangFix's key in the one moment it can be:
+;               right after a fix, in the same window, with the caret
+;               still where the fix left it. At every other moment the
+;               hotkey does not exist and Ctrl+Z is the application's
+;               own undo, exactly as always. After undoing once it
+;               hands the key straight back, so a second Ctrl+Z is the
+;               application's again.
+;               (A fix made through the SELECTION path is a single
+;               paste, so the application's own Ctrl+Z undoes it in one
+;               press already. This is for the typed path, which is
+;               many backspaces and would otherwise need many.)
+;
+;  Ctrl+Y       REDO - put the fix back after a Ctrl+Z. On exactly the
+;               same terms: only ours in the moment straight after one
+;               of our own undos, and the application's own redo at
+;               every other moment. Ctrl+Z and Ctrl+Y then cycle for as
+;               long as the caret stays where it is.
+;
+;  Ctrl+Alt+Z   The same undo and redo, always listening - so when
+;  Ctrl+Alt+Y   nothing seems to happen they can SAY WHY (wrong window,
+;               caret moved, nothing fixed yet). Ctrl+Z and Ctrl+Y stay
+;               silent in those cases because the application is using
+;               them.
+;
+;  Ctrl+Alt+D   Show the typing buffer, and what Ctrl+Alt+Z would put
+;               back.
 ;
 ;  The typed-characters buffer lives in memory only, never touches disk,
-;  holds at most 1000 characters and is cleared on Enter, Esc, Tab, any
+;  holds at most 1000 characters, NEVER holds a line break - a new line
+;  starts a new buffer - and is cleared on Enter, Esc, Tab, any
 ;  arrow/Home/End/Delete, any Ctrl or Alt combo except Ctrl+V, any mouse
 ;  click, and whenever the active window changes.
 ;
@@ -61,6 +103,24 @@ SetKeyDelay 8, 8
 ^!+sc026:: FixSelection()      ; Ctrl+Alt+Shift+L  fix the selection
 ^!+sc013:: FixClipboard(false) ; Ctrl+Alt+Shift+R  unreverse clipboard only
 ^!sc020::  ShowBuffer()        ; Ctrl+Alt+D        what's in the buffer
+^!sc02C::  UndoFix()           ; Ctrl+Alt+Z        put the last fix back
+^!sc015::  RedoFix()           ; Ctrl+Alt+Y        put the fix back again
+
+; Undo is the key everyone already presses: CTRL+Z. It is only ours in the
+; one moment it can be - straight after a fix, in the same window, with the
+; caret still where the fix left it. #HotIf makes the hotkey simply NOT
+; EXIST at any other time, so every other Ctrl+Z in your life goes to the
+; application untouched. Nothing to learn, nothing taken away.
+#HotIf CanUndoFix()
+^sc02C::   UndoFix()           ; Ctrl+Z, but only while we have a fix to undo
+#HotIf
+
+; Redo is Ctrl+Y, on exactly the same terms: it exists only in the moment
+; straight after one of our undos, and at every other moment Ctrl+Y is the
+; application's own redo, untouched.
+#HotIf CanRedoFix()
+^sc015::   RedoFix()           ; Ctrl+Y, but only right after our own undo
+#HotIf
 
 ; Alt-free twins. Any hotkey containing Alt can nudge an app's menu bar
 ; (see SwallowAlt below); these avoid the question entirely. Win+L itself
@@ -68,6 +128,8 @@ SetKeyDelay 8, 8
 ; the hook layer - so Win+Shift+L is the closest free equivalent.
 #+sc026::  FixTyped()          ; Win+Shift+L
 #+sc013::  FixClipboard(true)  ; Win+Shift+R
+#+sc02C::  UndoFix()           ; Win+Shift+Z
+#+sc015::  RedoFix()           ; Win+Shift+Y
 ; ---------------------------------------------------------------------
 
 ; reset the buffer on any mouse click (~ = let the click through)
@@ -106,6 +168,36 @@ for k, v in E2H.Clone() {
 global Buf    := ""        ; characters typed since the last reset
 global BufWin := 0         ; window they were typed into
 global Busy   := false     ; true while WE are sending keys
+
+; What the last fix produced, so a second press flips back exactly the same
+; characters instead of asking again where the wrong-language run began.
+global LastFixLine  := ""      ; the line as the fix left it
+global LastFixStart := 0       ; where in that line the fix began
+global LastFixWin   := 0       ; the window it happened in
+global LastFixTail  := ""      ; what was there before  <- undo types this
+global LastFixOut   := ""      ; what the fix put there <- undo deletes this
+; A fix through the SELECTION path is a single paste, and an application's
+; own Ctrl+Z undoes a paste in one press - better than we could, since it
+; restores the selection too. So we deliberately do NOT claim Ctrl+Z after
+; one. This only records that it happened, so Ctrl+Alt+Z can say so instead
+; of claiming there is nothing to undo.
+global LastFixWasPaste := false
+
+; Undo does not throw the fix away - it hands it to the redo slot, so Ctrl+Y
+; can put it back. Redo hands it straight back to the undo slot, so the two
+; keys cycle for as long as the caret stays put.
+global RedoLine  := ""         ; the line as the undo left it
+global RedoStart := 0
+global RedoWin   := 0
+global RedoTail  := ""         ; what the undo put back  <- redo deletes this
+global RedoOut   := ""         ; what the fix had put there <- redo types it
+
+; What a SELECTION fix replaced. The application's own Ctrl+Z undoes a paste
+; better than we can and remains the first answer, so this is only a last
+; resort - reachable from Ctrl+Alt+Z, never from plain Ctrl+Z, and never
+; automatic. It exists so that "the text is gone" is never the end of it.
+global SelUndoText := ""
+global SelUndoWin  := 0
 
 ; ===================== auto-fix console copies =======================
 ; Hebrew copied out of a console arrives visually ordered. We fix it at
@@ -230,6 +322,19 @@ IsTerminal() {
     return false
 }
 
+; Set true to record why an undo was or was not possible, one line per fix
+; and per undo decision, into _dbg_undo.txt. NOT a keylog - it records only
+; events LangFix itself caused, never keystrokes. It is what found the bug
+; on 09/09/2026 (see ReplaceTyped): the fix looked perfect while the undo
+; said "nothing to undo", and only the trace showed LastFixOut arriving
+; empty. Leave it off; turn it on when an undo refuses and you cannot see why.
+global UNDOTRACE := false
+UT(s) {
+    global UNDOTRACE
+    if (UNDOTRACE)
+        FileAppend A_TickCount " " s "`n", A_ScriptDir "\_dbg_undo.txt", "UTF-8"
+}
+
 global DEBUG := false      ; set true to log every keystroke to _dbg.txt
 Dbg(s) {
     global DEBUG
@@ -269,6 +374,17 @@ BufChar(ih, char) {
     ; would wipe the buffer a moment before FixTyped() reads it.
     if (GetKeyState("Control", "P") || GetKeyState("Alt", "P"))
         return
+    ; Enter reaches us here as a CHARACTER too, a moment after BufKey has
+    ; already cleared the buffer for it - so appending it would leave a lone
+    ; `r in an otherwise empty buffer, and the next fix would backspace
+    ; straight through the line break and eat the end of the previous line.
+    ; The buffer holds ONE line: a line break starts a new one.
+    if (char = "`r" || char = "`n") {
+        Buf := ""
+        BufWin := WinExist("A")
+        Dbg("line break -> buffer cleared")
+        return
+    }
     hwnd := WinExist("A")
     if (hwnd != BufWin) {                 ; moved to another window
         Dbg("char '" char "' : window changed " BufWin " -> " hwnd " (buffer cleared)")
@@ -317,6 +433,14 @@ IsModifierVK(vk) {
 ; and neither must Ctrl+V - a paste EXTENDS the buffer via TrackPaste()
 ; instead of invalidating it.
 IsOurHotkey(sc) {
+    ; Z is ours only while we are actually holding the undo key. When we are
+    ; not, Ctrl+Z is the APPLICATION undoing - text just changed underneath
+    ; us, and a buffer that survived that would be a lie we might later
+    ; backspace over. So in that case it must clear like any other combo.
+    if (sc = 0x02C)
+        return CanUndoFix()
+    if (sc = 0x015)                                 ; same for Y and redo
+        return CanRedoFix()
     return sc = 0x026 || sc = 0x013 || sc = 0x020   ; L, R, D
         || sc = 0x02F                               ; V
 }
@@ -333,9 +457,8 @@ TrackPaste() {
 
 AppendPaste(txt) {
     global Buf, BufWin
-    ; Multi-line or very large pastes are not safely reversible by
-    ; backspacing, so drop the buffer rather than guess at it.
-    if (txt = "" || StrLen(txt) > 1000 || InStr(txt, "`n") || InStr(txt, "`r")) {
+    ; Very large pastes are not safely reversible by backspacing.
+    if (txt = "" || StrLen(txt) > 1000) {
         Buf := ""
         return
     }
@@ -344,14 +467,43 @@ AppendPaste(txt) {
         Buf := ""
         BufWin := hwnd
     }
+    ; A multi-line paste leaves the caret at the end of its LAST line, and
+    ; everything before the caret on that line came from the paste - so that
+    ; tail is exactly what a fix may safely backspace over. The lines above
+    ; it are previous text now, and are left alone.
+    if (InStr(txt, "`n") || InStr(txt, "`r")) {
+        Buf := LastLine(txt)
+        Dbg("multi-line paste -> Buf=[" Buf "]")
+        return
+    }
     Buf .= txt
     Dbg("paste appended -> Buf=[" Buf "]")
 }
 
 ShowBuffer() {
-    global Buf
+    global Buf, LastFixLine, LastFixTail, LastFixOut, LastFixWin
     SwallowAlt()
-    Toast(Buf = "" ? "buffer empty" : "[" Buf "]", 2500)
+    global RedoOut, RedoTail, RedoWin, RedoLine
+    msg := Buf = "" ? "buffer empty" : "typed: [" Buf "]"
+    if (RedoOut != "") {
+        msg .= "`nCtrl+Y would put [" RedoTail "] back to [" RedoOut "]"
+        if (WinExist("A") != RedoWin)
+            msg .= "   (but that was another window)"
+        else if (Buf !== RedoLine)
+            msg .= "   (but the cursor has moved)"
+    }
+    if (LastFixOut != "") {
+        msg .= "`nCtrl+Z would put [" LastFixOut "] back to [" LastFixTail "]"
+        if (WinExist("A") != LastFixWin)
+            msg .= "   (but that was another window)"
+        else if (Buf !== LastFixLine)
+            msg .= "   (but the cursor has moved)"
+    }
+    ; Also onto the clipboard: a tooltip cannot be pasted into a message, and
+    ; this is the one thing you would want to send someone when Ctrl+Z has
+    ; refused and you cannot see why.
+    SetClip(msg)
+    Toast(msg, 4000)
 }
 
 ; ============================== actions ==============================
@@ -363,57 +515,322 @@ ShowBuffer() {
 ; with nothing selected (VS Code, for one) grabs the whole line instead.
 FixTyped() {
     global Buf, BufWin
+    ; Read the buffer BEFORE anything that sends a key. SwallowAlt() sends
+    ; one, our own hook sees it a moment later, and BufKey clears the buffer
+    ; for it - so a buffer read after that call is a race with ourselves,
+    ; won or lost by timing. This copy is what we act on.
+    src := Buf
+    win := BufWin
     SwallowAlt()
-    Dbg("HOTKEY FixTyped: Buf=[" Buf "] BufWin=" BufWin " active=" WinExist("A"))
-    if (Buf != "" && WinExist("A") = BufWin) {
-        ReplaceTyped()
+    UT("L    src=[" src "] win=" win " active=" WinExist("A"))
+    Dbg("HOTKEY FixTyped: Buf=[" src "] BufWin=" win " active=" WinExist("A"))
+    if (src != "" && WinExist("A") = win) {
+        ReplaceTyped(src)
+        return
+    }
+    ; IN A CONSOLE, STOP HERE. There is no selection to fall back to - Claude
+    ; Code and friends turn on mouse tracking, so a drag never becomes a text
+    ; selection the terminal knows about, and every key the selection path
+    ; would send (Ctrl+Insert, Ctrl+Shift+C, Ctrl+V) is a key the TUI reads
+    ; its own way. It cannot succeed there, and it can destroy the line. So
+    ; where the buffer is the only route, an empty buffer means DO NOTHING.
+    ; (Yair, 09/09/2026: it behaved correctly in WhatsApp, ReadAll and
+    ; Notepad, and ate the line only in this console.)
+    if (IsTerminal()) {
+        UT("L    terminal + empty buffer -> refused")
+        Toast("nothing to fix - in a console only what you have just typed"
+            . " can be fixed, and the buffer is empty", 3000)
         return
     }
     if (FixSelection(true))
         return
+    UT("L    nothing to fix")
     Toast("nothing to fix - type it, paste it, or select it", 2200)
 }
 
 ; Replace the tail of the input we have been watching.
-ReplaceTyped() {
-    global Buf, Busy
-    src := Buf
-    out := SwapLayout(src)
+; Two things are deliberately left alone: anything above the current line,
+; and anything up to the last character that was already in the right
+; language. Only the trailing wrong-language run is backspaced over.
+ReplaceTyped(src) {
+    ; EVERY LastFix* name has to be in this declaration. In AutoHotkey v2 a
+    ; variable ASSIGNED inside a function is local unless declared global -
+    ; silently, with no error - so LastFixOut := out was writing to a local
+    ; and the real global stayed empty. The undo then said "nothing to undo"
+    ; every single time, while the fix itself looked perfect. #Warn below
+    ; would have caught it; it is on now.
+    global Buf, Busy, LastFixLine, LastFixStart, LastFixWin
+    global LastFixTail, LastFixOut, LastFixWasPaste
+    src  := LastLine(src)                 ; a fix never crosses a line break
+    hwnd := WinExist("A")
+
+    ; A second press undoes the first: flip back exactly the run we changed.
+    ; Asking TailStart() again would give a different, longer answer - it
+    ; would be reading the FIXED text this time.
+    start := (src = LastFixLine && hwnd = LastFixWin && LastFixStart)
+                 ? LastFixStart
+                 : TailStart(src)
+    head := SubStr(src, 1, start - 1)
+    tail := SubStr(src, start)
+    if (tail = "") {
+        Toast("nothing to fix on this line", 1600)
+        return
+    }
+    out := SwapLayout(tail)
     ReleaseModifiers()
+    ; EVERYTHING below happens inside the Busy window, and that is the point.
+    ; The keys we send arrive at our own hook a moment after we send them, so
+    ; anything done after Busy is dropped would let our own typing land in the
+    ; buffer as though Yair had typed it. That never broke "press Ctrl+Alt+L
+    ; again", which only asks whether the buffer is non-empty - but Ctrl+Z
+    ; needs the buffer to match the line EXACTLY, and a doubled buffer reads
+    ; as "the cursor moved", so undo silently refused every time.
     Busy := true
-    TypeOut(StrLen(src), out)
-    Sleep 30
+    if (!TypeOut(StrLen(tail), out)) {    ; refused - nothing was deleted
+        Busy := false
+        return
+    }
+    Sleep 80                              ; let the hook drain our own keys
+    Buf := head . out                     ; press again to flip back
+    LastFixLine  := Buf
+    LastFixStart := start
+    LastFixWin   := hwnd
+    LastFixTail  := tail                  ; everything Ctrl+Z needs
+    LastFixOut   := out
+    LastFixWasPaste := false
+    ClearRedo()                           ; a new fix ends the undo/redo chain
+    UT("FIX  Buf=[" Buf "] LastFixLine=[" LastFixLine "] win=" hwnd
+     . " tail=[" tail "] out=[" out "]")
+    SetClip(Buf)
+    AnnounceFixed(out)                    ; the language we ended up typing in
+    Sleep 50                              ; and drain the layout switch too
     Busy := false
-    Buf := out                            ; press again to flip back
-    SetClip(out)
-    AnnounceFixed(out)
 }
 
-; Backspace over n characters and type the replacement. Terminals need the
-; slower event-based send; everywhere else SendInput keeps long replacements
-; from crawling.
+; Backspace over n characters and type the replacement.
+;
+; ONE call, never two. As two separate sends, anything arriving in between -
+; another hotkey, a focus change, a modal - leaves the characters deleted and
+; the replacement never typed, and the text is simply gone. SendInput blocks
+; other input for the duration of a single call, so as one string the pair is
+; effectively atomic. ({Text} switches the REST of the string to literal
+; text, which is exactly what we want after the backspaces.)
+;
+; It also refuses to delete anything it is not about to replace. A layout
+; swap is one character in, one character out, so any other length means
+; something upstream is wrong - and deleting on a wrong length is the one
+; failure with no recovery. Terminals need the slower event-based send;
+; everywhere else SendInput keeps long replacements from crawling.
 TypeOut(n, text) {
+    UT("TYPE delete " n " type " StrLen(text) " [" text "]")
+    if (n < 1 || text = "" || StrLen(text) !== n) {
+        Toast("internal check failed - nothing changed"
+            . " (delete " n ", type " StrLen(text) ")", 3000)
+        return false
+    }
     if (IsTerminal()) {
         SetKeyDelay 8, 8
-        SendEvent "{BackSpace " n "}"
-        SendEvent "{Text}" text
+        SendEvent "{BackSpace " n "}{Text}" text
     } else {
-        SendInput "{BackSpace " n "}"
-        SendInput "{Text}" text
+        SendInput "{BackSpace " n "}{Text}" text
     }
+    return true
+}
+
+; Is there a fix we can still safely undo? This is the #HotIf condition on
+; Ctrl+Z, so it answers a bigger question than it looks: whether LangFix
+; takes the undo key at all this instant, or leaves it to the application.
+; It must therefore be false far more often than true.
+;
+; Buf is cleared by anything that moves the caret - a click, an arrow key,
+; Enter, a window change - so "Buf is still exactly the line the fix
+; produced" is our proof that the caret has not moved since the fix.
+CanUndoFix() {
+    global Buf, LastFixLine, LastFixOut, LastFixWin
+    ok := LastFixOut !== ""
+       && WinExist("A") = LastFixWin
+       && Buf == LastFixLine
+    UT("CAN? " (ok ? "yes" : "NO")
+     . "  hasFix=" (LastFixOut !== "" ? 1 : 0)
+     . " sameWin=" (WinExist("A") = LastFixWin ? 1 : 0)
+     . " (" WinExist("A") " vs " LastFixWin ")"
+     . " bufMatch=" (Buf == LastFixLine ? 1 : 0)
+     . " Buf=[" Buf "] LastFixLine=[" LastFixLine "]")
+    return ok
+}
+
+; The mirror of CanUndoFix, and the #HotIf condition on Ctrl+Y. True only in
+; the moment straight after one of our own undos; false, and therefore Ctrl+Y
+; is the application's, at every other moment.
+CanRedoFix() {
+    global Buf, RedoLine, RedoOut, RedoWin
+    return RedoOut !== ""
+        && WinExist("A") = RedoWin
+        && Buf == RedoLine
+}
+
+ClearRedo() {
+    global RedoLine, RedoStart, RedoWin, RedoTail, RedoOut
+    RedoLine := "", RedoStart := 0, RedoWin := 0, RedoTail := "", RedoOut := ""
+}
+
+; Put back the fix that Ctrl+Z just took away, and hand it to the undo slot
+; again - so Ctrl+Z and Ctrl+Y cycle for as long as the caret stays put.
+RedoFix() {
+    global Buf, Busy, RedoLine, RedoStart, RedoWin, RedoTail, RedoOut
+    global LastFixLine, LastFixStart, LastFixWin, LastFixTail, LastFixOut
+    global LastFixWasPaste
+    SwallowAlt()
+    if (RedoOut = "") {
+        Toast("nothing to redo - Ctrl+Y follows a Ctrl+Z of ours", 2400)
+        return
+    }
+    if (WinExist("A") != RedoWin) {
+        Toast("that undo was in another window - go back to it first", 2600)
+        return
+    }
+    if (Buf !== RedoLine) {
+        Toast("the cursor moved since the undo - redo would type in the"
+            . " wrong place, so it did nothing", 3200)
+        return
+    }
+    ReleaseModifiers()
+    Busy := true
+    if (!TypeOut(StrLen(RedoTail), RedoOut)) {
+        Busy := false
+        return
+    }
+    Sleep 80
+    head := SubStr(RedoLine, 1, RedoStart - 1)
+    Buf := head . RedoOut
+    ; Straight back into the undo slot: Ctrl+Z can take it away again.
+    LastFixLine := Buf, LastFixStart := RedoStart, LastFixWin := RedoWin
+    LastFixTail := RedoTail, LastFixOut := RedoOut, LastFixWasPaste := false
+    ClearRedo()
+    SetClip(Buf)
+    SwitchLayout(HasHebrew(LastFixOut))
+    Sleep 50
+    Busy := false
+    Toast("fix put back", 1400)
+}
+
+; Put the last fix back, exactly - the same characters, in the same place.
+;
+; This is not "fix it again in the other direction": it types back what was
+; literally there before, so a fix that went wrong is recoverable rather
+; than converted twice. Pressing it again redoes, and so on.
+;
+; It refuses in every case where it cannot be sure the caret is still where
+; the fix left it. Backspacing blind is exactly the damage an undo exists to
+; prevent, so refusing loudly is the correct answer, not a fallback.
+UndoFix() {
+    ; Every global this touches must be named here - see check-globals.ps1.
+    global Buf, Busy, LastFixLine, LastFixStart, LastFixWin
+    global LastFixTail, LastFixOut, LastFixWasPaste
+    global RedoLine, RedoStart, RedoWin, RedoTail, RedoOut
+    SwallowAlt()
+    if (LastFixOut = "") {
+        global SelUndoText, SelUndoWin
+        ; A selection fix: offer the application's undo first, because it is
+        ; the better one. Pressing Ctrl+Alt+Z AGAIN pastes the original back.
+        if (LastFixWasPaste && SelUndoText != "" && WinExist("A") = SelUndoWin) {
+            static offered := 0
+            if (A_TickCount - offered > 6000) {
+                offered := A_TickCount
+                Toast("that fix was a paste - plain Ctrl+Z undoes it."
+                    . " Ctrl+Alt+Z again to paste the original back", 4000)
+                return
+            }
+            SetClip(SelUndoText)
+            ReleaseModifiers()
+            Send "^v"
+            Sleep 150
+            SelUndoText := ""
+            Toast("original pasted back", 1600)
+            return
+        }
+        Toast(LastFixWasPaste
+            ? "that fix was a paste - plain Ctrl+Z undoes it in one press"
+            : "nothing to undo - no fix has been made yet", 2800)
+        return
+    }
+    if (WinExist("A") != LastFixWin) {
+        Toast("the last fix was in another window - go back to it first", 2600)
+        return
+    }
+    ; Buf is cleared by anything that moves the caret: a click, an arrow key,
+    ; Enter, a window change. So Buf still matching the line the fix produced
+    ; is our proof that the caret has not moved since.
+    if (Buf !== LastFixLine) {
+        Toast("the cursor moved since the fix - undo would type in the wrong"
+            . " place, so it did nothing", 3200)
+        return
+    }
+    ReleaseModifiers()
+    Busy := true                          ; same window as ReplaceTyped, and
+    if (!TypeOut(StrLen(LastFixOut), LastFixTail)) {   ; for the same reason
+        Busy := false
+        return
+    }
+    Sleep 80
+
+    back := LastFixTail
+    Buf := SubStr(LastFixLine, 1, LastFixStart - 1) . back
+    ; Hand the undo key straight back. A second Ctrl+Z must be the
+    ; application's own undo, the way it would be anywhere else - not a redo,
+    ; which is not what that key means. To redo, fix it again: Ctrl+Alt+L.
+    ; Hand the pair to the redo slot before clearing, so Ctrl+Y can put the
+    ; fix back. Ctrl+Z itself is handed back to the application - a second
+    ; press must be its undo, not a redo, because that is not what Z means.
+    RedoLine := Buf, RedoStart := LastFixStart, RedoWin := LastFixWin
+    RedoTail := back, RedoOut := LastFixOut
+    LastFixLine := "", LastFixOut := "", LastFixTail := "", LastFixStart := 0
+    LastFixWasPaste := false
+    SetClip(Buf)
+    ; The keyboard follows the text here too - the same rule as the fix. The
+    ; text is back in the language it was in, so the keyboard should be.
+    SwitchLayout(HasHebrew(back))
+    Sleep 50
+    Busy := false
+    Toast("fix undone", 1400)
+}
+
+; Copy the selection WITHOUT ever sending a bare Ctrl+C.
+;
+; This is the most dangerous keystroke in the script. In a shell, Ctrl+C is
+; not copy - it is interrupt, or clear-the-line - and the text is gone with
+; no trace and no undo. The old code guarded that with IsTerminal(), but that
+; is a fixed allow-list: VS Code's integrated terminal, ConEmu, Hyper, Tabby,
+; Warp, or Claude Code in any host it does not recognise all fell through to
+; the bare Ctrl+C. An allow-list of the world is a list that is always wrong
+; somewhere.
+;
+; So the copy key is CTRL+INSERT, which every Windows application and every
+; console understands as copy, and which is destructive nowhere. Ctrl+Shift+C
+; stays only as a second try in a console we DO recognise, where it is known
+; to work and known to be safe. If neither produces anything, we simply have
+; no selection and the caller does nothing - which is the correct outcome,
+; not a fallback.
+CopySelection() {
+    Send "^{Insert}"                              ; universal copy, never SIGINT
+    if (ClipWait(0.5, 0) && A_Clipboard != "")
+        return
+    if (IsTerminal())                             ; known console: known-safe
+        Send "^+c"
 }
 
 ; Fix a real selection - browsers, Word, ReadAll, chat boxes.
 ; Returns true if it found a selection and acted on it.
 FixSelection(quiet := false) {
-    global Busy
+    global Busy, LastFixOut, LastFixWin, LastFixWasPaste
     ; FIRST - the hotkey's own Ctrl+Alt are still physically down, and a
     ; copy sent while Alt is held is Ctrl+Alt+C, which copies nothing.
     ReleaseModifiers()
     before := A_Clipboard
     Guard(3000)                                   ; this whole exchange is ours
     A_Clipboard := ""
-    Send IsTerminal() ? "^+c" : "^c"              ; ^c would interrupt a console
+    CopySelection()
+    UT("SEL  copied=[" A_Clipboard "] quiet=" (quiet ? 1 : 0))
     if (!ClipWait(0.7, 0) || A_Clipboard = "") {  ; nothing was selected
         A_Clipboard := before
         if (quiet)
@@ -427,6 +844,14 @@ FixSelection(quiet := false) {
         return true
     }
     sel := A_Clipboard
+    ; Some editors (VS Code, Visual Studio) answer Ctrl+C with nothing
+    ; selected by copying the WHOLE LINE, trailing line break and all. That
+    ; is not a selection, and pasting it back would duplicate the line - so
+    ; when we arrived here on our own, read it as "nothing was selected".
+    if (quiet && (SubStr(sel, -1) = "`n" || SubStr(sel, -1) = "`r")) {
+        A_Clipboard := before
+        return false
+    }
     out := SwapLayout(sel)                        ; no trimming: the paste has
     if (out = "") {                               ; to match the selection
         A_Clipboard := before
@@ -442,10 +867,18 @@ FixSelection(quiet := false) {
         Toast("clipboard is busy - try again", 1800)
         return false
     }
+    UT("SEL  PASTING over [" sel "] with [" out "]")
     Busy := true
     Send "^v"
     Sleep 150
     Busy := false
+    ; This one is the application's to undo - see LastFixWasPaste above.
+    LastFixOut := "", LastFixWasPaste := true, LastFixWin := WinExist("A")
+    ; Keep what we replaced. The application's own Ctrl+Z is the better undo
+    ; for a paste and stays the first answer - but if it ever is not there,
+    ; Ctrl+Alt+Z can put this back rather than the text being simply gone.
+    global SelUndoText, SelUndoWin
+    SelUndoText := sel, SelUndoWin := WinExist("A")
     AnnounceFixed(out)
     return true
 }
@@ -547,6 +980,58 @@ IsHebrewChar(c) {
     return (o >= 0x05D0 && o <= 0x05EA)   ; alef..tav
 }
 
+; ===================== where a fix should START ======================
+; A wrong-language run sits at the END of what was typed - that is why the
+; hotkey is being pressed at all. Everything before it came out right and
+; has to survive, including a Hebrew name inside an English line:
+;
+;     in case גולן is at the correct פךשבק
+;                                     ^ the fix starts here  ->  place
+;
+; So: take the script of the LAST letter, walk back over that script and
+; over neutral characters (spaces, digits, punctuation - they belong to
+; neither), and stop dead at the first letter of the other script.
+
+; "H" Hebrew, "L" Latin, "" neither.
+ScriptOf(c) {
+    if (IsHebrewChar(c))
+        return "H"
+    o := Ord(c)
+    return ((o >= 0x41 && o <= 0x5A) || (o >= 0x61 && o <= 0x7A)) ? "L" : ""
+}
+
+; 1-based index of the first character a fix may change. 1 when the string
+; is all one script, or has no letters in it at all.
+TailStart(s) {
+    want := "", i := StrLen(s)
+    while (i >= 1) {                              ; the last letter's script
+        if ((t := ScriptOf(SubStr(s, i, 1))) != "") {
+            want := t
+            break
+        }
+        i--
+    }
+    if (want = "")
+        return 1
+    start := i, j := i - 1
+    while (j >= 1) {
+        t := ScriptOf(SubStr(s, j, 1))
+        if (t != "" && t != want)                 ; the other script - stop
+            break
+        if (t = want)
+            start := j                            ; still inside the run
+        j--                                       ; neutral - keep walking
+    }
+    return start
+}
+
+; The text after the last line break: the line the caret is sitting on.
+LastLine(s) {
+    if ((p := InStr(s, "`n", , -1)) || (p := InStr(s, "`r", , -1)))
+        return SubStr(s, p + 1)
+    return s
+}
+
 ; ========================= reversed-Hebrew fix =======================
 ; Console copies of RTL text come out visually ordered. Reverse each line
 ; that actually contains Hebrew, keeping Latin/digit runs readable and
@@ -613,6 +1098,22 @@ A_TrayMenu.Add("Auto un-reverse Hebrew copied from consoles", ToggleAutoFix)
 A_TrayMenu.Check("Auto un-reverse Hebrew copied from consoles")
 A_TrayMenu.Add("Also switch the keyboard language on Ctrl+Alt+L", ToggleSwitchLang)
 A_TrayMenu.Check("Also switch the keyboard language on Ctrl+Alt+L")
+A_TrayMenu.Add("Record what the fix/undo did (_dbg_undo.txt)", ToggleUndoTrace)
+
+; Turn this on, reproduce the problem, then send _dbg_undo.txt. It records
+; one line per fix, undo and typed replacement - what was deleted, what was
+; typed, which condition refused - and NOTHING ELSE. It is not a keylog: it
+; never records what you type, only what LangFix itself did about it.
+ToggleUndoTrace(name, *) {
+    global UNDOTRACE
+    UNDOTRACE := !UNDOTRACE
+    if (UNDOTRACE)
+        A_TrayMenu.Check(name)
+    else
+        A_TrayMenu.Uncheck(name)
+    Toast(UNDOTRACE ? "recording to " A_ScriptDir "\_dbg_undo.txt"
+                    : "recording off", 3000)
+}
 
 ToggleSwitchLang(name, *) {
     global SwitchLang
