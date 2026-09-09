@@ -243,6 +243,21 @@ and `Ctrl+Alt+L` reaches for it automatically.
 In a console there is no selection to reach for (see above), so there the buffer is the only
 route: fix it before you press Enter.
 
+**And in a console the fallback is switched off entirely.** If the buffer is empty there,
+`Ctrl+Alt+L` does nothing and says so. It used to fall through to the selection path, which
+in a console cannot succeed — there is no selection — but *can* do harm, because every key
+it sends (`Ctrl+Insert`, `Ctrl+Shift+C`, `Ctrl+V`) is a key the TUI reads its own way.
+
+That is the shape of the bug Yair hit on 09/09/2026: fix, `Ctrl+Z`, `Ctrl+Z`, `Ctrl+Alt+L`,
+`Ctrl+Alt+L` — and the line was gone. **Only in a console.** WhatsApp, ReadAll and Notepad
+all behaved correctly, because there the fallback finds a real selection or a real absence
+of one. The two `Ctrl+Z` presses are what set it up: the second one is not ours, so it
+clears the buffer, and an empty buffer is what sends `Ctrl+Alt+L` down the fallback.
+
+Worth being honest about: the exact key that ate the line has not been caught in the act —
+this removes the whole path rather than the one keystroke, which is the better fix anyway
+since the path could never have worked there.
+
 ### The buffer
 
 In memory only, never written to disk, capped at 1000 characters, and **never holding a

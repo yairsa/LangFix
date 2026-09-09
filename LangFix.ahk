@@ -528,6 +528,20 @@ FixTyped() {
         ReplaceTyped(src)
         return
     }
+    ; IN A CONSOLE, STOP HERE. There is no selection to fall back to - Claude
+    ; Code and friends turn on mouse tracking, so a drag never becomes a text
+    ; selection the terminal knows about, and every key the selection path
+    ; would send (Ctrl+Insert, Ctrl+Shift+C, Ctrl+V) is a key the TUI reads
+    ; its own way. It cannot succeed there, and it can destroy the line. So
+    ; where the buffer is the only route, an empty buffer means DO NOTHING.
+    ; (Yair, 09/09/2026: it behaved correctly in WhatsApp, ReadAll and
+    ; Notepad, and ate the line only in this console.)
+    if (IsTerminal()) {
+        UT("L    terminal + empty buffer -> refused")
+        Toast("nothing to fix - in a console only what you have just typed"
+            . " can be fixed, and the buffer is empty", 3000)
+        return
+    }
     if (FixSelection(true))
         return
     UT("L    nothing to fix")
