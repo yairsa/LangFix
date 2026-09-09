@@ -81,6 +81,7 @@ $e2eTests = @(
     @{ name = 'paste + select';   script = 'e2e-paste-and-select.ahk'; out = '_pastesel.txt' }
     @{ name = 'console copy';     script = 'e2e-console-copy.ahk';     out = '_consolecopy.txt' }
     @{ name = 'partial + lines';  script = 'e2e-partial-and-lines.ahk'; out = '_partial.txt' }
+    @{ name = 'undo on Ctrl+Z';   script = 'e2e-undo.ahk';             out = '_undo.txt' }
 )
 Write-Host "`nStarting the end-to-end tests - the keyboard and mouse are theirs" -ForegroundColor Yellow
 Write-Host "for about a minute. Windows open on the secondary monitor." -ForegroundColor Yellow
