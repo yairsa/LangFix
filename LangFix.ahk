@@ -1,5 +1,10 @@
 ﻿#Requires AutoHotkey v2.0
 #SingleInstance Force
+; Catches the bug that cost an afternoon on 09/09/2026: assigning to a name
+; that is also a global, without declaring it, silently creates a local and
+; leaves the global untouched. OutputDebug, not MsgBox - this script runs all
+; day and must never pop a dialog at Yair.
+#Warn LocalSameAsGlobal, OutputDebug
 SendMode "Input"
 #UseHook true
 SetKeyDelay 8, 8
@@ -285,6 +290,19 @@ IsTerminal() {
     return false
 }
 
+; Set true to record why an undo was or was not possible, one line per fix
+; and per undo decision, into _dbg_undo.txt. NOT a keylog - it records only
+; events LangFix itself caused, never keystrokes. It is what found the bug
+; on 09/09/2026 (see ReplaceTyped): the fix looked perfect while the undo
+; said "nothing to undo", and only the trace showed LastFixOut arriving
+; empty. Leave it off; turn it on when an undo refuses and you cannot see why.
+global UNDOTRACE := false
+UT(s) {
+    global UNDOTRACE
+    if (UNDOTRACE)
+        FileAppend A_TickCount " " s "`n", A_ScriptDir "\_dbg_undo.txt", "UTF-8"
+}
+
 global DEBUG := false      ; set true to log every keystroke to _dbg.txt
 Dbg(s) {
     global DEBUG
@@ -439,6 +457,10 @@ ShowBuffer() {
         else if (Buf !== LastFixLine)
             msg .= "   (but the cursor has moved)"
     }
+    ; Also onto the clipboard: a tooltip cannot be pasted into a message, and
+    ; this is the one thing you would want to send someone when Ctrl+Z has
+    ; refused and you cannot see why.
+    SetClip(msg)
     Toast(msg, 4000)
 }
 
@@ -467,7 +489,14 @@ FixTyped() {
 ; and anything up to the last character that was already in the right
 ; language. Only the trailing wrong-language run is backspaced over.
 ReplaceTyped() {
-    global Buf, Busy, LastFixLine, LastFixStart, LastFixWin, LastFixWasPaste
+    ; EVERY LastFix* name has to be in this declaration. In AutoHotkey v2 a
+    ; variable ASSIGNED inside a function is local unless declared global -
+    ; silently, with no error - so LastFixOut := out was writing to a local
+    ; and the real global stayed empty. The undo then said "nothing to undo"
+    ; every single time, while the fix itself looked perfect. #Warn below
+    ; would have caught it; it is on now.
+    global Buf, Busy, LastFixLine, LastFixStart, LastFixWin
+    global LastFixTail, LastFixOut, LastFixWasPaste
     src  := LastLine(Buf)                 ; a fix never crosses a line break
     hwnd := WinExist("A")
 
@@ -485,19 +514,29 @@ ReplaceTyped() {
     }
     out := SwapLayout(tail)
     ReleaseModifiers()
+    ; EVERYTHING below happens inside the Busy window, and that is the point.
+    ; The keys we send arrive at our own hook a moment after we send them, so
+    ; anything done after Busy is dropped would let our own typing land in the
+    ; buffer as though Yair had typed it. That never broke "press Ctrl+Alt+L
+    ; again", which only asks whether the buffer is non-empty - but Ctrl+Z
+    ; needs the buffer to match the line EXACTLY, and a doubled buffer reads
+    ; as "the cursor moved", so undo silently refused every time.
     Busy := true
     TypeOut(StrLen(tail), out)
-    Sleep 30
-    Busy := false
+    Sleep 80                              ; let the hook drain our own keys
     Buf := head . out                     ; press again to flip back
     LastFixLine  := Buf
     LastFixStart := start
     LastFixWin   := hwnd
-    LastFixTail  := tail                  ; everything Ctrl+Alt+Z needs
+    LastFixTail  := tail                  ; everything Ctrl+Z needs
     LastFixOut   := out
     LastFixWasPaste := false
+    UT("FIX  Buf=[" Buf "] LastFixLine=[" LastFixLine "] win=" hwnd
+     . " tail=[" tail "] out=[" out "]")
     SetClip(Buf)
     AnnounceFixed(out)                    ; the language we ended up typing in
+    Sleep 50                              ; and drain the layout switch too
+    Busy := false
 }
 
 ; Backspace over n characters and type the replacement. Terminals need the
@@ -524,9 +563,16 @@ TypeOut(n, text) {
 ; produced" is our proof that the caret has not moved since the fix.
 CanUndoFix() {
     global Buf, LastFixLine, LastFixOut, LastFixWin
-    return LastFixOut !== ""
-        && WinExist("A") = LastFixWin
-        && Buf == LastFixLine
+    ok := LastFixOut !== ""
+       && WinExist("A") = LastFixWin
+       && Buf == LastFixLine
+    UT("CAN? " (ok ? "yes" : "NO")
+     . "  hasFix=" (LastFixOut !== "" ? 1 : 0)
+     . " sameWin=" (WinExist("A") = LastFixWin ? 1 : 0)
+     . " (" WinExist("A") " vs " LastFixWin ")"
+     . " bufMatch=" (Buf == LastFixLine ? 1 : 0)
+     . " Buf=[" Buf "] LastFixLine=[" LastFixLine "]")
+    return ok
 }
 
 ; Put the last fix back, exactly - the same characters, in the same place.
@@ -561,10 +607,9 @@ UndoFix() {
         return
     }
     ReleaseModifiers()
-    Busy := true
-    TypeOut(StrLen(LastFixOut), LastFixTail)
-    Sleep 30
-    Busy := false
+    Busy := true                          ; same window as ReplaceTyped, and
+    TypeOut(StrLen(LastFixOut), LastFixTail)   ; for the same reason
+    Sleep 80
 
     back := LastFixTail
     Buf := SubStr(LastFixLine, 1, LastFixStart - 1) . back
@@ -577,6 +622,8 @@ UndoFix() {
     ; The keyboard follows the text here too - the same rule as the fix. The
     ; text is back in the language it was in, so the keyboard should be.
     SwitchLayout(HasHebrew(back))
+    Sleep 50
+    Busy := false
     Toast("fix undone", 1400)
 }
 

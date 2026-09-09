@@ -12,7 +12,7 @@ starts with Windows.
 | **Ctrl + Alt + Shift + R** | Reverse fix on the **clipboard only**, no paste. |
 | **Ctrl + Z** | **Undo the last fix** — the normal undo key. Puts back exactly what `Ctrl+Alt+L` changed. It is only LangFix's key in the moment it can be; the rest of the time it is your application's own undo, untouched. |
 | **Ctrl + Alt + Z** | The same undo, always listening — so when nothing appears to happen, it says *why*. |
-| **Ctrl + Alt + D** | Show the typing buffer, and what `Ctrl+Z` would put back (debug). |
+| **Ctrl + Alt + D** | Show the typing buffer and what `Ctrl+Z` would put back — **and copy that to the clipboard**, so it can be pasted into a message. |
 | **Win + Shift + L / R** | Alt-free twins of the two main fixes. Same behaviour, no Alt involved. |
 
 A small tooltip confirms each action.
@@ -104,6 +104,34 @@ One trap this had to close on the way in: the buffer must **not** treat `Ctrl+Z`
 ours when we are not holding the key. Otherwise an application-level undo would change the
 text while our buffer survived unchanged — and a later fix would backspace over characters
 that had already gone.
+
+### The bug that cost an afternoon: a local that looked like a global
+
+The undo shipped broken and every symptom pointed the wrong way. The fix worked perfectly;
+`Ctrl+Z` did nothing; the text still went back, because the *application's* own undo was
+quietly doing it — so it even looked as though it worked.
+
+The cause: **in AutoHotkey v2 a variable ASSIGNED inside a function is local unless declared
+global — silently, with no error.** `ReplaceTyped()` declared `LastFixLine` but not
+`LastFixOut`, so `LastFixOut := out` wrote to a local and the real global stayed empty.
+`CanUndoFix()` then read `LastFixOut = ""`, correctly concluded there was nothing to undo,
+and the hotkey never existed.
+
+Three things came out of it, all of them kept:
+
+- **`#Warn LocalSameAsGlobal, OutputDebug`** at the top of the script. It would have named
+  this in one line. `OutputDebug`, never `MsgBox` — this script runs all day and must not
+  pop a dialog.
+- **`UNDOTRACE`** (off by default): one line per fix and per undo decision into
+  `_dbg_undo.txt`, saying which of the three conditions failed. It is not a keylog — it
+  records only what LangFix itself did. Turn it on when an undo refuses and you cannot see
+  why; it is what finally found this.
+- **A test must be able to say YES.** The first version of `e2e-undo.ahk` looked for
+  LangFix's tooltip as evidence that it had acted — but `WinExist` never finds AHK's own
+  tooltip windows, so every reading came back "did not act", including for fixes that had
+  visibly worked. A detector that can only ever report failure proves nothing. It now uses a
+  clipboard sentinel: LangFix writes its result to the clipboard whenever it changes text,
+  and the application does not.
 
 ### Why not snapshot the whole field first
 

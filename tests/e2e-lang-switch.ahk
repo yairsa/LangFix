@@ -54,7 +54,10 @@ ExitApp
 
 Lay() {
     tid := DllCall("GetWindowThreadProcessId", "Ptr", WinExist("A"), "Ptr", 0, "UInt")
-    return Format("{:08X}", DllCall("GetKeyboardLayout", "UInt", tid, "Ptr"))
+    ; An HKL is a POINTER: on 64-bit it sign-extends to FFFFFFFF.... and
+    ; printing it whole made a correct Hebrew layout read as a failure.
+    ; The language is the LOW WORD, and that is the only part we asked for.
+    return Format("{:04X}", DllCall("GetKeyboardLayout", "UInt", tid, "Ptr") & 0xFFFF)
 }
 
 #Include screen.ahk
